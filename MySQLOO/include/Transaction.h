@@ -20,13 +20,13 @@ protected:
 	bool executeStatement(MYSQL * connection, std::shared_ptr<IQueryData> data);
 	void onDestroyed(GarrysMod::Lua::ILuaBase* LUA);
 private:
-	std::deque<std::pair<std::shared_ptr<Query>, std::shared_ptr<IQueryData>>> m_queries;
+	std::deque<std::pair<std::shared_ptr<IQuery>, std::shared_ptr<IQueryData>>> m_queries;
 };
 
 class TransactionData : public IQueryData {
 	friend class Transaction;
 protected:
-	std::deque<std::pair<std::shared_ptr<Query>, std::shared_ptr<IQueryData>>> m_queries;
+	std::deque<std::pair<std::shared_ptr<IQuery>, std::shared_ptr<IQueryData>>> m_queries;
 	bool retried = false;
 };
 #endif

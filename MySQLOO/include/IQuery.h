@@ -43,6 +43,7 @@ private:
 
 class IQuery : public LuaObjectBase {
 	friend class Database;
+	friend class Transaction;
 public:
 	IQuery(Database* dbase, GarrysMod::Lua::ILuaBase* LUA);
 	virtual ~IQuery();

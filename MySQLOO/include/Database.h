@@ -26,6 +26,7 @@ enum DatabaseStatus {
 
 class Database : public LuaObjectBase {
 	friend class IQuery;
+	friend class Transaction;
 public:
 	enum {
 		INTEGER = 0,

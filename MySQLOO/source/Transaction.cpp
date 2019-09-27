@@ -25,6 +25,10 @@ int Transaction::addQuery(lua_State* state) {
 	}
 	auto queryPtr = std::dynamic_pointer_cast<Query>(iQuery->getSharedPointerInstance());
 	auto queryData = iQuery->buildQueryData(LUA);
+	if (iQuery->runningQueryData.size() == 0) {
+		iQuery->referenceTable(LUA, iQuery, 2);
+	}
+	std::shared_ptr<IQueryData> ptr = iQuery->buildQueryData(LUA);
 	iQuery->addQueryData(LUA, queryData);
 	transaction->m_queries.push_back(std::make_pair(queryPtr, queryData));
 	return 0;
@@ -69,11 +73,6 @@ void Transaction::doCallback(GarrysMod::Lua::ILuaBase* LUA, std::shared_ptr<IQue
 		}
 		break;
 	}
-	for (auto& pair : data->m_queries) {
-		auto query = pair.first;
-		auto queryData = pair.second;
-		query->onQueryDataFinished(LUA, queryData);
-	}
 }
 
 bool Transaction::executeStatement(MYSQL* connection, std::shared_ptr<IQueryData> ptr) {
@@ -90,14 +89,26 @@ bool Transaction::executeStatement(MYSQL* connection, std::shared_ptr<IQueryData
 		this->mysqlAutocommit(connection, false);
 		{
 			for (auto& query : data->m_queries) {
+				auto curquery = query.first.get();
+				auto &data = query.second;
 				try {
 					//Errors are cleared in case this is retrying after losing connection
-					query.second->setResultStatus(QUERY_NONE);
-					query.second->setError("");
-					query.first->executeQuery(connection, query.second);
+					data->setResultStatus(QUERY_NONE);
+					data->setError("");
+					curquery->executeStatement(connection, data);
+					data->setFinished(true);
+					m_database->finishedQueries.put(query);
+					{
+						std::unique_lock<std::mutex> queryMutex(curquery->m_waitMutex);
+						curquery->m_waitWakeupVariable.notify_one();
+					}
 				} catch (const MySQLException& error) {
-					query.second->setError(error.what());
-					query.second->setResultStatus(QUERY_ERROR);
+					data->setFinished(true);
+					m_database->finishedQueries.put(query);
+					{
+						std::unique_lock<std::mutex> queryMutex(curquery->m_waitMutex);
+						curquery->m_waitWakeupVariable.notify_one();
+					}
 					throw error;
 				}
 			}
