@@ -5,7 +5,6 @@
 
 Transaction::Transaction(Database* dbase, GarrysMod::Lua::ILuaBase* LUA) : IQuery(dbase, LUA) {
 	registerFunction(LUA, "addQuery", Transaction::addQuery);
-	registerFunction(LUA, "getQueries", Transaction::getQueries);
 	registerFunction(LUA, "clearQueries", Transaction::clearQueries);
 }
 
@@ -24,36 +23,11 @@ int Transaction::addQuery(lua_State* state) {
 	if (query == nullptr) {
 		LUA->ThrowError("Tried to pass non query to addQuery()");
 	}
-	//This is all very ugly
-	LUA->Push(1);
-	LUA->GetField(-1, "__queries");
-	if (LUA->IsType(-1, GarrysMod::Lua::Type::NIL)) {
-		LUA->Pop();
-		LUA->CreateTable();
-		LUA->SetField(-2, "__queries");
-		LUA->GetField(-1, "__queries");
-	}
-	int tblIndex = LUA->Top();
-	LUA->PushSpecial(GarrysMod::Lua::SPECIAL_GLOB);
-	LUA->GetField(-1, "table");
-	LUA->GetField(-1, "insert");
-	LUA->Push(tblIndex);
-	LUA->Push(2);
-	LUA->Call(2, 0);
-	LUA->Push(4);
+	auto queryPtr = std::dynamic_pointer_cast<Query>(iQuery->getSharedPointerInstance());
+	auto queryData = iQuery->buildQueryData(LUA);
+	iQuery->addQueryData(LUA, queryData);
+	transaction->m_queries.push_back(std::make_pair(queryPtr, queryData));
 	return 0;
-}
-
-int Transaction::getQueries(lua_State* state) {
-	GarrysMod::Lua::ILuaBase* LUA = state->luabase;
-	LUA->SetState(state);
-	Transaction* transaction = dynamic_cast<Transaction*>(unpackSelf(LUA, TYPE_QUERY));
-	if (transaction == nullptr) {
-		LUA->ThrowError("Tried to pass wrong self");
-	}
-	LUA->Push(1);
-	LUA->GetField(-1, "__queries");
-	return 1;
 }
 
 int Transaction::clearQueries(lua_State* state) {
@@ -63,10 +37,8 @@ int Transaction::clearQueries(lua_State* state) {
 	if (transaction == nullptr) {
 		LUA->ThrowError("Tried to pass wrong self");
 	}
-	LUA->Push(1);
-	LUA->PushNil();
-	LUA->SetField(-2, "__queries");
-	LUA->Pop();
+
+	transaction->m_queries.clear();
 	return 0;
 }
 
@@ -175,30 +147,7 @@ std::shared_ptr<IQueryData> Transaction::buildQueryData(GarrysMod::Lua::ILuaBase
 	//since this is always called shortly after transaction:start()
 	std::shared_ptr<IQueryData> ptr(new TransactionData());
 	TransactionData* data = (TransactionData*)ptr.get();
-	this->pushTableReference(LUA);
-	LUA->GetField(-1, "__queries");
-	if (!LUA->IsType(-1, GarrysMod::Lua::Type::TABLE)) {
-		LUA->Pop(2);
-		return ptr;
-	}
-	int index = 1;
-	//Stuff could go horribly wrong here if a lua error occurs
-	//but it really shouldn't
-	while (true) {
-		LUA->PushNumber(index++);
-		LUA->GetTable(-2);
-		if (!LUA->IsType(-1, GarrysMod::Lua::Type::TABLE)) {
-			LUA->Pop();
-			break;
-		}
-		//This would error if it's not a query
-		Query* iQuery = (Query*)unpackLuaObject(LUA, -1, TYPE_QUERY, false);
-		auto queryPtr = std::dynamic_pointer_cast<Query>(iQuery->getSharedPointerInstance());
-		auto queryData = iQuery->buildQueryData(LUA);
-		iQuery->addQueryData(LUA, queryData, false);
-		data->m_queries.push_back(std::make_pair(queryPtr, queryData));
-		LUA->Pop();
-	}
-	LUA->Pop(2);
+	data->m_queries = this->m_queries;
+	this->m_queries.clear();
 	return ptr;
 }

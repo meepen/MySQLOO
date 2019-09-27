@@ -201,17 +201,16 @@ bool IQuery::mysqlNextResult(MYSQL* sql) {
 	return false;
 }
 
-void IQuery::addQueryData(GarrysMod::Lua::ILuaBase* LUA, std::shared_ptr<IQueryData> data, bool shouldRefCallbacks) {
+void IQuery::addQueryData(GarrysMod::Lua::ILuaBase* LUA, std::shared_ptr<IQueryData> data) {
 	if (!hasBeenStarted) {
 		data->m_wasFirstData = true;
 	}
 	runningQueryData.push_back(data);
-	if (shouldRefCallbacks) {
-		data->m_onDataReference = this->getCallbackReference(LUA, "onData");
-		data->m_errorReference = this->getCallbackReference(LUA, "onError");
-		data->m_abortReference = this->getCallbackReference(LUA, "onAborted");
-		data->m_successReference = this->getCallbackReference(LUA, "onSuccess");
-	}
+
+	data->m_onDataReference = this->getCallbackReference(LUA, "onData");
+	data->m_errorReference = this->getCallbackReference(LUA, "onError");
+	data->m_abortReference = this->getCallbackReference(LUA, "onAborted");
+	data->m_successReference = this->getCallbackReference(LUA, "onSuccess");
 }
 void IQuery::onQueryDataFinished(GarrysMod::Lua::ILuaBase* LUA, std::shared_ptr<IQueryData> data) {
 	runningQueryData.erase(std::remove(runningQueryData.begin(), runningQueryData.end(), data));

@@ -49,7 +49,7 @@ public:
 	virtual void doCallback(GarrysMod::Lua::ILuaBase* LUA, std::shared_ptr<IQueryData> queryData) = 0;
 	virtual void onDestroyed(GarrysMod::Lua::ILuaBase* LUA) {};
 	virtual std::shared_ptr<IQueryData> buildQueryData(GarrysMod::Lua::ILuaBase* LUA) = 0;
-	void addQueryData(GarrysMod::Lua::ILuaBase* LUA, std::shared_ptr<IQueryData> data, bool shouldRefCallbacks = true);
+	void addQueryData(GarrysMod::Lua::ILuaBase* LUA, std::shared_ptr<IQueryData> data);
 	void onQueryDataFinished(GarrysMod::Lua::ILuaBase* LUA, std::shared_ptr<IQueryData> data);
 	void setCallbackData(std::shared_ptr<IQueryData> data) {
 		callbackQueryData = data;

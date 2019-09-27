@@ -19,6 +19,8 @@ protected:
 	static int getQueries(lua_State* state);
 	bool executeStatement(MYSQL * connection, std::shared_ptr<IQueryData> data);
 	void onDestroyed(GarrysMod::Lua::ILuaBase* LUA);
+private:
+	std::deque<std::pair<std::shared_ptr<Query>, std::shared_ptr<IQueryData>>> m_queries;
 };
 
 class TransactionData : public IQueryData {
