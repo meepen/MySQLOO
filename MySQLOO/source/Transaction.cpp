@@ -50,11 +50,6 @@ int Transaction::clearQueries(lua_State* state) {
 void Transaction::doCallback(GarrysMod::Lua::ILuaBase* LUA, std::shared_ptr<IQueryData> ptr) {
 	TransactionData* data = (TransactionData*)ptr.get();
 	data->setStatus(QUERY_COMPLETE);
-	for (auto& pair : data->m_queries) {
-		auto query = pair.first;
-		auto queryData = pair.second;
-		query->setCallbackData(queryData);
-	}
 	switch (data->getResultStatus()) {
 	case QUERY_NONE:
 		break;
@@ -90,20 +85,23 @@ bool Transaction::executeStatement(MYSQL* connection, std::shared_ptr<IQueryData
 		{
 			for (auto& query : data->m_queries) {
 				auto curquery = query.first.get();
-				auto &data = query.second;
+				auto &curdata = query.second;
 				try {
 					//Errors are cleared in case this is retrying after losing connection
-					data->setResultStatus(QUERY_NONE);
-					data->setError("");
-					curquery->executeStatement(connection, data);
-					data->setFinished(true);
+					curdata->setResultStatus(QUERY_NONE);
+					curdata->setError("");
+					curquery->executeQuery(connection, curdata);
+					curdata->setResultStatus(QUERY_SUCCESS);
+					curdata->setFinished(true);
 					m_database->finishedQueries.put(query);
 					{
 						std::unique_lock<std::mutex> queryMutex(curquery->m_waitMutex);
 						curquery->m_waitWakeupVariable.notify_one();
 					}
 				} catch (const MySQLException& error) {
-					data->setFinished(true);
+					curdata->setResultStatus(QUERY_ERROR);
+					curdata->setError(error.what());
+					curdata->setFinished(true);
 					m_database->finishedQueries.put(query);
 					{
 						std::unique_lock<std::mutex> queryMutex(curquery->m_waitMutex);
@@ -113,41 +111,37 @@ bool Transaction::executeStatement(MYSQL* connection, std::shared_ptr<IQueryData
 				}
 			}
 		}
-		mysql_commit(connection);
-		data->setResultStatus(QUERY_SUCCESS);
-		this->mysqlAutocommit(connection, true);
-	} catch (const MySQLException& error) {
-		//This check makes sure that setting mysqlAutocommit back to true doesn't cause the transaction to fail
-		//Even though the transaction was executed successfully
-		if (data->getResultStatus() != QUERY_SUCCESS) {
-			int errorCode = error.getErrorCode();
-			if (oldReconnectStatus && !data->retried &&
-				(errorCode == CR_SERVER_LOST || errorCode == CR_SERVER_GONE_ERROR)) {
-				//Because autoreconnect is disabled we want to try and explicitly execute the transaction once more
-				//if we can get the client to reconnect (reconnect is caused by mysql_ping)
-				//If this fails we just go ahead and error
-				m_database->setAutoReconnect((my_bool)1);
-				if (mysql_ping(connection) == 0) {
-					data->retried = true;
-					return executeStatement(connection, ptr);
-				}
-			}
-			//If this call fails it means that the connection was (probably) lost
-			//In that case the mysql server rolls back any transaction anyways so it doesn't
-			//matter if it fails
-			mysql_rollback(connection);
-			data->setResultStatus(QUERY_ERROR);
+		if (mysql_commit(connection)) {
+			throw MySQLException(CR_UNKNOWN_ERROR, "commit failed");
 		}
-		//If this fails it probably means that the connection was lost
-		//In that case autocommit is turned back on anyways (once the connection is reestablished)
-		//See: https://dev.mysql.com/doc/refman/5.7/en/auto-reconnect.html
-		mysql_autocommit(connection, true);
+		data->setResultStatus(QUERY_SUCCESS);
+	} catch (const MySQLException& error) {
+		data->setResultStatus(QUERY_ERROR);
 		data->setError(error.what());
+
+		int errorCode = error.getErrorCode();
+		if (oldReconnectStatus && !data->retried &&
+			(errorCode == CR_SERVER_LOST || errorCode == CR_SERVER_GONE_ERROR)) {
+			//Because autoreconnect is disabled we want to try and explicitly execute the transaction once more
+			//if we can get the client to reconnect (reconnect is caused by mysql_ping)
+			//If this fails we just go ahead and error
+			m_database->setAutoReconnect((my_bool)1);
+			if (mysql_ping(connection) == 0) {
+				data->retried = true;
+				return executeStatement(connection, ptr);
+			}
+		}
+		//If this call fails it means that the connection was (probably) lost
+		//In that case the mysql server rolls back any transaction anyways so it doesn't
+		//matter if it fails
+		mysql_rollback(connection);
 	}
-	for (auto& pair : data->m_queries) {
-		pair.second->setResultStatus(data->getResultStatus());
-		pair.second->setStatus(QUERY_COMPLETE);
-	}
+
+	//If this fails it probably means that the connection was lost
+	//In that case autocommit is turned back on anyways (once the connection is reestablished)
+	//See: https://dev.mysql.com/doc/refman/5.7/en/auto-reconnect.html
+	mysql_autocommit(connection, true);
+
 	data->setStatus(QUERY_COMPLETE);
 	return true;
 }
