@@ -86,27 +86,17 @@ bool Transaction::executeStatement(MYSQL* connection, std::shared_ptr<IQueryData
 			for (auto& query : data->m_queries) {
 				auto curquery = query.first.get();
 				auto &curdata = query.second;
+				//Errors are cleared in case this is retrying after losing connection
+				curdata->setResultStatus(QUERY_NONE);
+				curdata->setError("");
 				try {
-					//Errors are cleared in case this is retrying after losing connection
-					curdata->setResultStatus(QUERY_NONE);
-					curdata->setError("");
 					curquery->executeQuery(connection, curdata);
 					curdata->setResultStatus(QUERY_SUCCESS);
 					curdata->setFinished(true);
-					m_database->finishedQueries.put(query);
-					{
-						std::unique_lock<std::mutex> queryMutex(curquery->m_waitMutex);
-						curquery->m_waitWakeupVariable.notify_one();
-					}
 				} catch (const MySQLException& error) {
 					curdata->setResultStatus(QUERY_ERROR);
 					curdata->setError(error.what());
 					curdata->setFinished(true);
-					m_database->finishedQueries.put(query);
-					{
-						std::unique_lock<std::mutex> queryMutex(curquery->m_waitMutex);
-						curquery->m_waitWakeupVariable.notify_one();
-					}
 					throw error;
 				}
 			}
@@ -127,6 +117,9 @@ bool Transaction::executeStatement(MYSQL* connection, std::shared_ptr<IQueryData
 			//If this fails we just go ahead and error
 			m_database->setAutoReconnect((my_bool)1);
 			if (mysql_ping(connection) == 0) {
+				for (auto& query : data->m_queries) {
+					query.second->setFinished(false);
+				}
 				data->retried = true;
 				return executeStatement(connection, ptr);
 			}
@@ -135,6 +128,19 @@ bool Transaction::executeStatement(MYSQL* connection, std::shared_ptr<IQueryData
 		//In that case the mysql server rolls back any transaction anyways so it doesn't
 		//matter if it fails
 		mysql_rollback(connection);
+	}
+
+	for (auto& query : data->m_queries) {
+		auto curquery = query.first.get();
+		auto &curdata = query.second;
+		if (!curdata->isFinished())
+			continue;
+
+		m_database->finishedQueries.put(query);
+		{
+			std::unique_lock<std::mutex> queryMutex(curquery->m_waitMutex);
+			curquery->m_waitWakeupVariable.notify_one();
+		}
 	}
 
 	//If this fails it probably means that the connection was lost
